@@ -12,6 +12,7 @@ node -e 'const { parseUrl } = require("query-string");
   require("node:assert/strict").equal(link.fragmentIdentifier, "one two+three");'
 # electron-log resolves Electron's path during import. These tests use a mocked runtime.
 ELECTRON_OVERRIDE_DIST_PATH=/tmp vitest run --maxWorkers=1 --reporter=dot \
+  packages/protocol/src/messages.pull-request-timeline.test.ts \
   packages/desktop/src/features/{auto-updater,app-update-service,app-update-rollout}.test.ts
 npm run build:app-deps:clean
 (cd packages/app && PASEO_WEB_PLATFORM=electron expo export --platform web --max-workers 3)
