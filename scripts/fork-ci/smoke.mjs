@@ -1,10 +1,10 @@
 // Uses the runner's Node and built-in CDP transport, without installing packages.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { randomInt } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import dgram from "node:dgram";
 import { once } from "node:events";
-import { existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -62,29 +62,22 @@ async function availablePort() {
 
 // Query the renderer via Chrome DevTools Protocol, matching the packaged app URL
 // and desktop preload bridge used in packages/desktop/e2e/packaged-app-smoke.js.
-async function rendererStatus(port) {
+async function evaluateRenderer(port, evaluate, args, timeout = 5000) {
   const response = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(2000) });
   const target = (await response.json()).find((page) => page.type === "page" && page.url.startsWith("paseo://app/"));
   assert.ok(target, "waiting for paseo://app/ renderer");
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   try {
-    const signal = AbortSignal.timeout(5000);
+    const signal = AbortSignal.timeout(timeout);
     await once(ws, "open", { signal });
-    const expression = `(async () => {
-      const root = document.querySelector("#root");
-      const text = document.body?.innerText || "";
-      const bridge = window.paseoDesktop;
-      const ready = root?.childElementCount > 0 && /Welcome to Paseo|Skip setup/i.test(text)
-        && ["invoke", "events", "window", "dialog", "browser"].every(key => key in (bridge || {}));
-      return { ready, text: text.slice(0, 250),
-        daemon: ready ? await bridge.invoke("desktop_daemon_status") : null };
-    })()`;
+    const expression = `(${evaluate})(${JSON.stringify(args)})`;
     ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } }));
     for (;;) {
       const [event] = await once(ws, "message", { signal });
       const message = JSON.parse(event.data);
       if (message.id !== 1) continue;
-      assert.ok(!message.error && !message.result.exceptionDetails, "renderer evaluation failed");
+      assert.ok(!message.error && !message.result.exceptionDetails,
+        message.error?.message ?? message.result?.exceptionDetails?.exception?.description ?? "renderer evaluation failed");
       return message.result.result.value;
     }
   } finally {
@@ -92,8 +85,76 @@ async function rendererStatus(port) {
   }
 }
 
+async function rendererStatus() {
+  const root = document.querySelector("#root");
+  const text = document.body?.innerText || "";
+  const bridge = window.paseoDesktop;
+  const ready = root?.childElementCount > 0 && /Welcome to Paseo|Skip setup/i.test(text)
+    && ["invoke", "events", "window", "dialog", "browser"].every(key => key in (bridge || {}));
+  return { ready, text: text.slice(0, 250),
+    daemon: ready ? await bridge.invoke("desktop_daemon_status") : null };
+}
+
 function cli(...args) {
   return execFileSync(shim, args, { encoding: "utf8", timeout: 20000, stdio: ["ignore", "pipe", "inherit"] });
+}
+
+async function openChat({ workspaceId, serverId, agentId, projectName, workspaceName, question, reply }) {
+  const deadline = Date.now() + 60000;
+  async function visible(selector, text) {
+    for (;;) {
+      const element = [...document.querySelectorAll(selector)].find(node =>
+        node.checkVisibility({ visibilityProperty: true, opacityProperty: true }) &&
+        node.getBoundingClientRect().height > 0 &&
+        (!text || node.innerText.includes(text)));
+      if (element) return element;
+      if (Date.now() >= deadline) {
+        throw new Error(`Waiting for ${selector} ${text ?? ""} at ${location.pathname}: ${document.body.innerText.slice(0, 650)}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+  }
+  const testId = id => `[data-testid="${CSS.escape(id)}"]`;
+  (await visible('[data-testid="onboarding-modal"] :is(button,[role="button"])', "Skip setup")).click();
+  (await visible(testId(`sidebar-workspace-row-${serverId}:${workspaceId}`))).click();
+  await visible(testId("workspace-header-title"), workspaceName);
+  await visible(testId("workspace-header-subtitle"), projectName);
+  const tab = testId(`workspace-tab-agent_${agentId}`);
+  (await visible(tab)).click();
+  await visible(tab + '[aria-selected="true"]');
+  const chat = testId("agent-chat-scroll") + " ";
+  await visible(chat + testId("user-message"), question);
+  await visible(chat + testId("assistant-message"), reply);
+}
+
+async function checkProjectChat(cdpPort, serverId) {
+  const cwd = path.join(root, "paseo-smoke-project");
+  mkdirSync(cwd);
+  const workspace = JSON.parse(cli("workspace", "create", "--isolation", "local", "--path", cwd,
+    "--title", "Mac smoke workspace", "--json"));
+  assert.equal(workspace.cwd, cwd);
+
+  // Exercise the production transcript importer with a disposable local history.
+  const sessionId = randomUUID();
+  const question = "Which project is open?";
+  const reply = `The smoke project is open (${sessionId}).`;
+  const title = "Imported smoke conversation";
+  const projectDir = path.join(process.env.HOME, ".claude", "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+  mkdirSync(projectDir, { recursive: true });
+  const history = [
+    { type: "user", uuid: randomUUID(), message: { role: "user", content: question } },
+    { type: "assistant", uuid: randomUUID(), message: { role: "assistant", content: reply } },
+    { type: "custom-title", customTitle: title },
+  ];
+  writeFileSync(path.join(projectDir, sessionId + ".jsonl"),
+    history.map(entry => JSON.stringify({ ...entry, sessionId, cwd })).join("\n") + "\n");
+  const agent = JSON.parse(cli("agent", "import", sessionId, "--provider", "claude", "--cwd", cwd, "--json"));
+  assert.equal(agent.title, title);
+  await evaluateRenderer(cdpPort, openChat, {
+    workspaceId: workspace.workspaceId, serverId, agentId: agent.agentId,
+    projectName: workspace.project, workspaceName: workspace.name, question, reply,
+  }, 70000);
+  console.log(`Opened project "${workspace.project}" and workspace "${workspace.name}". Selected "${title}" and read both fixture messages.`);
 }
 
 async function checkTerminal() {
@@ -127,6 +188,8 @@ process.env.PASEO_LISTEN = listen;
 process.env.PASEO_ELECTRON_FLAGS = `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${cdpPort}`;
 writeFileSync(path.join(daemonHome, "config.json"), JSON.stringify({
   version: 1, daemon: { listen, relay: { enabled: false }, mcp: { enabled: false, injectIntoAgents: false } },
+  // History import reads JSONL locally. Prevent any model invocation or provider login.
+  agents: { providers: { claude: { command: ["/usr/bin/false"] } } },
 }));
 const logFd = openSync(appLog, "a");
 const child = spawn(path.join(contents, "MacOS/Paseo"), [], { detached: true, stdio: ["ignore", logFd, logFd] });
@@ -137,7 +200,7 @@ try {
     assert.ok(child.exitCode === null && child.signalCode === null,
       `Desktop exited (code ${child.exitCode}, signal ${child.signalCode})`);
     try {
-      last = await rendererStatus(cdpPort);
+      last = await evaluateRenderer(cdpPort, rendererStatus);
       const daemon = last.daemon;
       if (last.ready && daemon?.status === "running" && daemon.desktopManaged === true &&
           Number.isInteger(daemon.pid) && daemon.serverId && daemon.listen === listen && daemon.home === daemonHome) {
@@ -156,6 +219,7 @@ try {
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, "ok");
   await checkTerminal();
+  await checkProjectChat(cdpPort, last.daemon.serverId);
 } catch (error) {
   for (const log of [appLog, path.join(process.env.PASEO_ELECTRON_USER_DATA_DIR, "logs/main.log"), path.join(daemonHome, "daemon.log")]) {
     if (existsSync(log)) console.error(`${path.basename(log)} tail:\n${readFileSync(log, "utf8").slice(-6000)}`);
