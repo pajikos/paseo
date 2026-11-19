@@ -6,7 +6,6 @@ permissions:
 jobs:
   build:
     name: Build macOS ARM64 in Linux
-    if: github.repository == 'pajikos/paseo' && github.ref == 'refs/heads/fork/stable'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 50
     outputs:
@@ -31,6 +30,7 @@ jobs:
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
+    needs: security
   smoke:
     name: Open Desktop and exercise terminal
     needs: build
@@ -55,7 +55,7 @@ jobs:
           bash scripts/fork-ci/smoke.sh "$RUNNER_TEMP/candidate"
   security:
     name: Scan npm dependencies
-    if: github.repository == 'pajikos/paseo' && github.ref == 'refs/heads/fork/stable'
+    if: github.repository == 'pajikos/paseo' && (github.ref == 'refs/heads/fork/stable' || startsWith(github.ref, 'refs/heads/update/'))
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 20
     steps:
