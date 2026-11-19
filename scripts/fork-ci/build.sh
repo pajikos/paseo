@@ -12,7 +12,7 @@ image=node@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78c
 fork=$(git rev-parse HEAD)
 git merge-base --is-ancestor "$upstream" "$fork"
 lock_digest=$(git show "$fork:package-lock.json" | sha256sum | cut -d' ' -f1)
-[[ $lock_digest == fb7530457bb1c60090639b718444992d1621ed0d607454785005add4dc48887f ]]
+[[ $lock_digest == 0c163e3ea3236121bc519ee8f0b42a8d796a9436603ed59a5d0ceed5421c093e ]]
 
 output=$(realpath -m -- "$1")
 scratch=$(mktemp -d)
