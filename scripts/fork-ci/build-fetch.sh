@@ -8,7 +8,7 @@ for tree in src target; do tar xf /manifests.tar -C "$tree"; done
 cd src
 npm ci --ignore-scripts --no-audit --no-fund
 version=$(node -p 'require("./node_modules/electron/package.json").version')
-[[ $version == 44.2.0 ]]
+[[ $version == 44.11.5 ]]
 archive="electron-v$version-darwin-arm64.zip"
 checksum=$(node -p 'require("./node_modules/electron/checksums.json")[process.argv[1]]' "$archive")
 [[ $checksum =~ ^[0-9a-f]{64}$ ]]

@@ -57,6 +57,14 @@ describe("pull request timeline message schemas", () => {
     });
   });
 
+  test("materializes a missing timeline payload for clients", () => {
+    const response = PullRequestTimelineResponseSchema.parse({
+      type: "pull_request_timeline_response",
+    });
+    expect(response.payload.requestId).toBe("");
+    expect(response.payload.items).toEqual([]);
+  });
+
   test("defaults optional response payload and malformed timeline item fields", () => {
     const parsed = PullRequestTimelineResponseSchema.parse({
       type: "pull_request_timeline_response",

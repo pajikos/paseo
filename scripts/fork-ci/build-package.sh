@@ -6,8 +6,13 @@ cd /home/node/src
 export PATH="/home/node/src/node_modules/.bin:$PATH"
 export npm_config_offline=true EXPO_OFFLINE=1 NODE_OPTIONS=--max-old-space-size=4608
 node scripts/postinstall-patches.mjs
+# Exercise the CommonJS caller and distinguish a literal plus from an encoded plus.
+node -e 'const { parseUrl } = require("query-string");
+  const link = parseUrl("/project#one+two%2Bthree", { parseFragmentIdentifier: true });
+  require("node:assert/strict").equal(link.fragmentIdentifier, "one two+three");'
 # electron-log resolves Electron's path during import. These tests use a mocked runtime.
 ELECTRON_OVERRIDE_DIST_PATH=/tmp vitest run --maxWorkers=1 --reporter=dot \
+  packages/protocol/src/messages.pull-request-timeline.test.ts \
   packages/desktop/src/features/{auto-updater,app-update-service,app-update-rollout}.test.ts
 npm run build:app-deps:clean
 (cd packages/app && PASEO_WEB_PLATFORM=electron expo export --platform web --max-workers 3)
@@ -29,7 +34,7 @@ const config = yaml.parse(fs.readFileSync("electron-builder.yml", "utf8"));
 config.publish = null;
 config.mac.identity = null;
 config.mac.notarize = false;
-config.electronVersion = "44.2.0";
+config.electronVersion = "44.11.5";
 config.electronDist = "/home/node/electron";
 fs.writeFileSync("trial-builder.json", JSON.stringify(config));
 NODE

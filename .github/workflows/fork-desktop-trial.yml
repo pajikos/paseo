@@ -32,27 +32,28 @@ jobs:
           if-no-files-found: error
     needs: security
   smoke:
-    name: Open Desktop and exercise terminal
+    name: Desktop runtime test (blocked by isolation)
     needs: build
-    runs-on: macos-26
-    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    permissions: {}
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: desktop-arm64-${{ github.sha }}
-          path: ${{ runner.temp }}/candidate
-      - name: Check exact build and run isolated smoke test
+      - name: Report unavailable macOS isolation
         env:
-          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+          ARCHIVE_SHA256: ${{ needs.build.outputs.sha256 }}
         run: |
-          test "$(uname -m)" = arm64
-          cd "$RUNNER_TEMP/candidate"
-          printf '%s  %s\n' "$EXPECTED_SHA256" Paseo-mac-arm64.tar.gz | shasum -a 256 -c -
-          cd "$GITHUB_WORKSPACE"
-          bash scripts/fork-ci/smoke.sh "$RUNNER_TEMP/candidate"
+          {
+            echo '### Desktop runtime test blocked'
+            echo
+            echo 'The standard macos-26 runner could not start a nested macOS VM. A separate user shared the runner’s graphical session.'
+            echo 'The packaged app was not launched. Its window, project, chat and terminal remain unverified.'
+            echo
+            printf 'Build artifact: `desktop-arm64-%s` · archive SHA-256: `%s`\n' "$GITHUB_SHA" "$ARCHIVE_SHA256"
+            echo
+            echo '[Hosted macOS isolation probe](https://github.com/pajikos/paseo/actions/runs/44614226027/job/135878502375)'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo '::error title=Desktop runtime test blocked::The required offline macOS GUI environment is unavailable on standard GitHub-hosted runners.'
+          exit 1
   security:
     name: Scan npm dependencies
     if: github.repository == 'pajikos/paseo' && (github.ref == 'refs/heads/fork/stable' || startsWith(github.ref, 'refs/heads/update/'))

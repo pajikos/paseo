@@ -8,6 +8,11 @@ import { join, relative } from "node:path";
 // workspace root live in their workspace's own node_modules, and patch-package resolves
 // the patch's node_modules/... paths relative to its working directory.
 const patchedPackages = [
+  // Expo 57 loads query-string 7. Keep its URL semantics with the fixed ESM decoder.
+  {
+    nodeModulesPath: "node_modules/query-string",
+    patchPrefix: "query-string+",
+  },
   // Backport for expo-modules-core 57.0.23: https://github.com/expo/expo/pull/49634.
   // Remove when the installed Expo SDK includes the Activity recreation fix.
   {

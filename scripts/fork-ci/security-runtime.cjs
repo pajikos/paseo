@@ -65,7 +65,7 @@ async function main() {
   if (!runtime.has("packages/server") || !runtime.has("packages/cli")) throw new Error("Missing CLI or daemon");
   // build-fetch.sh takes this exact devDependency's version and checksum for the shipped macOS binary.
   const electron = desktop.edgesOut.get("electron")?.to;
-  if (electron?.location !== "node_modules/electron" || electron.version !== "44.2.0") {
+  if (electron?.location !== "node_modules/electron" || electron.version !== "44.11.5") {
     throw new Error("Electron lock entry does not match the packaged version");
   }
   const { vulnerabilities } = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));

@@ -89,6 +89,7 @@ buildNpmPackage rec {
 
   buildPhase = ''
     runHook preBuild
+    patch -p1 --fuzz=0 < patches/query-string+7.1.3.patch
 
     # Rebuild only node-pty (native addon for terminal emulation). The sherpa
     # speech runtime ships prebuilt platform packages and is copied into the
