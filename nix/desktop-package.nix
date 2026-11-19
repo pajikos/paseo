@@ -96,6 +96,7 @@ buildNpmPackage {
 
   buildPhase = ''
     runHook preBuild
+    patch -p1 --fuzz=0 < patches/query-string+7.1.3.patch
 
     # Native deps (terminal emulation; libuv-linked on Linux)
     npm rebuild node-pty

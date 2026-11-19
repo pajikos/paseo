@@ -6,6 +6,10 @@ cd /home/node/src
 export PATH="/home/node/src/node_modules/.bin:$PATH"
 export npm_config_offline=true EXPO_OFFLINE=1 NODE_OPTIONS=--max-old-space-size=4608
 node scripts/postinstall-patches.mjs
+# Exercise the CommonJS caller and distinguish a literal plus from an encoded plus.
+node -e 'const { parseUrl } = require("query-string");
+  const link = parseUrl("/project#one+two%2Bthree", { parseFragmentIdentifier: true });
+  require("node:assert/strict").equal(link.fragmentIdentifier, "one two+three");'
 # electron-log resolves Electron's path during import. These tests use a mocked runtime.
 ELECTRON_OVERRIDE_DIST_PATH=/tmp vitest run --maxWorkers=1 --reporter=dot \
   packages/desktop/src/features/{auto-updater,app-update-service,app-update-rollout}.test.ts
