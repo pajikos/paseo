@@ -1,10 +1,8 @@
 name: Fork desktop trial
 on:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   build:
     name: Build macOS ARM64 in Linux
@@ -33,7 +31,6 @@ jobs:
           retention-days: 7
           compression-level: 0
           if-no-files-found: error
-
   smoke:
     name: Open Desktop and exercise terminal
     needs: build
@@ -56,3 +53,30 @@ jobs:
           printf '%s  %s\n' "$EXPECTED_SHA256" Paseo-mac-arm64.tar.gz | shasum -a 256 -c -
           cd "$GITHUB_WORKSPACE"
           bash scripts/fork-ci/smoke.sh "$RUNNER_TEMP/candidate"
+  security:
+    name: Scan npm dependencies
+    if: github.repository == 'pajikos/paseo' && github.ref == 'refs/heads/fork/stable'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Scan pinned npm versions
+        run: |-
+          python3 -I scripts/fork-ci/security-test.py
+          bash scripts/fork-ci/security.sh "$RUNNER_TEMP/npm-security"
+      - name: Include scan summary
+        if: '${{ !cancelled() }}'
+        run: |-
+          if test -f "$RUNNER_TEMP/npm-security/security-summary.txt"; then
+            sed 's/^/    /' "$RUNNER_TEMP/npm-security/security-summary.txt" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload security reports
+        if: '${{ !cancelled() }}'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: npm-security-${{ github.sha }}
+          path: ${{ runner.temp }}/npm-security/
+          retention-days: 7
+          if-no-files-found: error
