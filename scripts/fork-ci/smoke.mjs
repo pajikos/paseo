@@ -214,7 +214,9 @@ try {
     if (Date.now() >= deadline) throw new Error(`Timed out waiting for renderer and desktop-managed daemon: ${JSON.stringify(last)}`);
     await delay(500);
   }
-  console.log(`Paseo rendered its setup screen and started its daemon on ${listen}.`);
+  const sandbox = await evaluateRenderer(cdpPort, () => window.paseoDesktop.invoke("desktop_sandbox_diagnostics"));
+  assert.equal(sandbox?.enabled, true, "Packaged Desktop reports that the Chromium sandbox is disabled");
+  console.log(`Paseo rendered its setup screen, reported Chromium sandboxing enabled and started its daemon on ${listen}.`);
   const response = await fetch(`http://${listen}/api/health`, { signal: AbortSignal.timeout(3000) });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).status, "ok");
