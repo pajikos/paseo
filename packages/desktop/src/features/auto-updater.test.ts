@@ -4,26 +4,14 @@ import path from "node:path";
 import { UUID } from "builder-util-runtime";
 import { describe, expect, it, vi } from "vitest";
 
-const { autoUpdaterMock } = vi.hoisted(() => {
-  const handlers = new Map<string, (value: unknown) => void>();
-  return {
-    autoUpdaterMock: {
-      handlers,
-      logger: {
-        debug: vi.fn(),
-        error: vi.fn((message: unknown) => console.error(message)),
-        info: vi.fn(),
-        warn: vi.fn(),
-      },
-      checkForUpdates: vi.fn(),
-      downloadUpdate: vi.fn(),
-      on: vi.fn((event: string, handler: (value: unknown) => void) => {
-        handlers.set(event, handler);
-      }),
-      quitAndInstall: vi.fn(),
-    },
-  };
-});
+const { autoUpdaterMock } = vi.hoisted(() => ({
+  autoUpdaterMock: {
+    checkForUpdates: vi.fn(),
+    downloadUpdate: vi.fn(),
+    on: vi.fn(),
+    quitAndInstall: vi.fn(),
+  },
+}));
 
 vi.mock("electron", () => ({
   app: {
@@ -40,30 +28,19 @@ import {
   bucketFromStagingUserId,
   checkForAppUpdate,
   createAppUpdateLifecycleLogger,
+  downloadAndInstallUpdate,
+  installAppUpdateOnQuit,
   resolveStagingUserId,
   rolloutManifestSchema,
   shouldAdmitToRollout,
   shouldInstallAppUpdateOnQuit,
 } from "./auto-updater";
 
-describe("checkForAppUpdate", () => {
-  it("treats an unpublished channel manifest as an unavailable update", async () => {
-    const error = Object.assign(new Error("Cannot find latest-mac.yml"), {
-      code: "ERR_UPDATER_CHANNEL_FILE_NOT_FOUND",
-    });
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    autoUpdaterMock.checkForUpdates.mockImplementationOnce(async () => {
-      autoUpdaterMock.logger.error(error);
-      autoUpdaterMock.handlers.get("error")?.(error);
-      throw error;
-    });
+describe("packaged fork update policy", () => {
+  const release = { currentVersion: "1.2.3", releaseChannel: "stable" } as const;
 
-    const result = await checkForAppUpdate({
-      currentVersion: "1.2.3",
-      releaseChannel: "stable",
-      intent: "manual",
-    });
-
+  it.each(["manual", "automatic"] as const)("skips %s checks", async (intent) => {
+    const result = await checkForAppUpdate({ ...release, intent });
     expect(result).toEqual({
       hasUpdate: false,
       readyToInstall: false,
@@ -73,30 +50,28 @@ describe("checkForAppUpdate", () => {
       date: null,
       errorMessage: null,
     });
-    expect(consoleError).not.toHaveBeenCalled();
-    consoleError.mockRestore();
+    expect(autoUpdaterMock.on).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
   });
 
-  it("keeps genuine updater failures visible", async () => {
-    const error = new Error("network down");
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    autoUpdaterMock.checkForUpdates.mockImplementationOnce(async () => {
-      autoUpdaterMock.logger.error(error);
-      autoUpdaterMock.handlers.get("error")?.(error);
-      throw error;
+  it("skips manual installation and installation on quit", async () => {
+    const beforeQuit = vi.fn();
+    await expect(downloadAndInstallUpdate(release, beforeQuit)).resolves.toMatchObject({
+      installed: false,
+      version: release.currentVersion,
     });
-
-    const result = await checkForAppUpdate({
-      currentVersion: "1.2.3",
-      releaseChannel: "stable",
-      intent: "manual",
-    });
-
-    expect(result.errorMessage).toBe("network down");
-    expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
+    await expect(
+      installAppUpdateOnQuit({ ...release, signal: new AbortController().signal }),
+    ).resolves.toBe(false);
+    expect(beforeQuit).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.on).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.downloadUpdate).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.quitAndInstall).not.toHaveBeenCalled();
   });
+});
 
+describe("update lifecycle logging", () => {
   it("logs the update handoff with current and selected target versions", () => {
     const info = vi.fn();
     const lifecycleLog = createAppUpdateLifecycleLogger({ info });

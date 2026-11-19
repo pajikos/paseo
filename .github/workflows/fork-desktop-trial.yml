@@ -1,0 +1,58 @@
+name: Fork desktop trial
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build macOS ARM64 in Linux
+    if: github.repository == 'pajikos/paseo' && github.ref == 'refs/heads/fork/stable'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 50
+    outputs:
+      sha256: ${{ steps.digest.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 64
+      - name: Build candidate
+        run: bash scripts/fork-ci/build.sh "$RUNNER_TEMP/candidate"
+      - name: Verify archive and record digest
+        id: digest
+        working-directory: ${{ runner.temp }}/candidate
+        run: |
+          sha256sum -c SHA256SUMS
+          echo "sha256=$(sha256sum Paseo-mac-arm64.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: desktop-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/candidate/
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
+
+  smoke:
+    name: Open Desktop and exercise terminal
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: desktop-arm64-${{ github.sha }}
+          path: ${{ runner.temp }}/candidate
+      - name: Check exact build and run isolated smoke test
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          test "$(uname -m)" = arm64
+          cd "$RUNNER_TEMP/candidate"
+          printf '%s  %s\n' "$EXPECTED_SHA256" Paseo-mac-arm64.tar.gz | shasum -a 256 -c -
+          cd "$GITHUB_WORKSPACE"
+          bash scripts/fork-ci/smoke.sh "$RUNNER_TEMP/candidate"
