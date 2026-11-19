@@ -204,7 +204,7 @@ try {
       const daemon = last.daemon;
       if (last.ready && daemon?.status === "running" && daemon.desktopManaged === true &&
           Number.isInteger(daemon.pid) && daemon.serverId && daemon.listen === listen && daemon.home === daemonHome) {
-        const window = execFileSync(path.join(path.dirname(process.execPath), "check-window"), [String(child.pid)], { encoding: "utf8", timeout: 5000 });
+        const window = execFileSync(path.join(import.meta.dirname, "check-window"), [String(child.pid)], { encoding: "utf8", timeout: 5000 });
         console.log(window.trim());
         break;
       }

@@ -29,8 +29,8 @@ if ! codesign --verify --deep --strict "$app" 2>/dev/null; then
   echo "Ad-hoc signed the smoke copy of archive $digest"
 fi
 
-# Only scratch is writable under the profile. The candidate cannot replace the checker.
-cp "$(command -v node)" "$checker/node"
+# Keep Node beside its runner-provided shared library. Only scratch is writable.
+runner_node=$(node -p 'process.execPath')
 cp "$scripts/smoke.mjs" "$checker/check.mjs"
 xcrun swiftc "$scripts/smoke-window.swift" -o "$checker/check-window"
 cd "$scratch"
@@ -40,4 +40,4 @@ env -i HOME="$scratch/home" USERPROFILE="$scratch/home" CFFIXED_USER_HOME="$scra
   LANG=en_US.UTF-8 PATH=/usr/bin:/bin:/usr/sbin:/sbin \
   /usr/bin/sandbox-exec -D "SCRATCH=$scratch" -D "RUNNER_HOME=$HOME" \
     -D "RUNNER_TMP=$RUNNER_TEMP" -f "$scripts/smoke.sb" \
-    "$checker/node" "$checker/check.mjs" "$scratch"
+    "$runner_node" "$checker/check.mjs" "$scratch"
