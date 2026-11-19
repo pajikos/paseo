@@ -4,79 +4,41 @@ on:
 permissions:
   contents: read
 jobs:
-  build:
-    name: Build macOS ARM64 in Linux
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 50
-    outputs:
-      sha256: ${{ steps.digest.outputs.sha256 }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-          fetch-depth: 64
-      - name: Build candidate
-        run: bash scripts/fork-ci/build.sh "$RUNNER_TEMP/candidate"
-      - name: Verify archive and record digest
-        id: digest
-        working-directory: ${{ runner.temp }}/candidate
-        run: |
-          sha256sum -c SHA256SUMS
-          echo "sha256=$(sha256sum Paseo-mac-arm64.tar.gz | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: desktop-arm64-${{ github.sha }}
-          path: ${{ runner.temp }}/candidate/
-          retention-days: 7
-          compression-level: 0
-          if-no-files-found: error
-    needs: security
-  smoke:
-    name: Open Desktop and exercise terminal
-    needs: build
+  probe:
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: desktop-arm64-${{ github.sha }}
-          path: ${{ runner.temp }}/candidate
-      - name: Check exact build and run isolated smoke test
-        env:
-          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+      - name: Check VM and isolated GUI login capabilities
         run: |
-          test "$(uname -m)" = arm64
-          cd "$RUNNER_TEMP/candidate"
-          printf '%s  %s\n' "$EXPECTED_SHA256" Paseo-mac-arm64.tar.gz | shasum -a 256 -c -
-          cd "$GITHUB_WORKSPACE"
-          bash scripts/fork-ci/smoke.sh "$RUNNER_TEMP/candidate"
-  security:
-    name: Scan npm dependencies
-    if: github.repository == 'pajikos/paseo' && (github.ref == 'refs/heads/fork/stable' || startsWith(github.ref, 'refs/heads/update/'))
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          persist-credentials: false
-      - name: Scan pinned npm versions
-        run: |-
-          python3 -I scripts/fork-ci/security-test.py
-          bash scripts/fork-ci/security.sh "$RUNNER_TEMP/npm-security"
-      - name: Include scan summary
-        if: '${{ !cancelled() }}'
-        run: |-
-          if test -f "$RUNNER_TEMP/npm-security/security-summary.txt"; then
-            sed 's/^/    /' "$RUNNER_TEMP/npm-security/security-summary.txt" >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          [[ $RUNNER_ENVIRONMENT == github-hosted && $(uname -sm) == 'Darwin arm64' ]]
+          probe=$(mktemp -d /private/tmp/paseo-capabilities.XXXXXXXX)
+          trap 'rm -rf "$probe"' EXIT
+          chmod 755 "$probe"
+          cat > "$probe/session.swift" <<'SWIFT'
+          import CoreGraphics
+          import Darwin
+          import Virtualization
+
+          print("macOS guest virtualization supported:", VZVirtualMachine.isSupported)
+          let id = getuid()
+          let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+          let owner = session?[kCGSessionUserIDKey as String] as? NSNumber
+          let login = session?[kCGSessionLoginDoneKey as String] as? Bool ?? false
+          print("process UID:", id, "WindowServer session UID:", owner?.stringValue ?? "none", "GUI login:", login)
+          if CommandLine.arguments.contains("--test-account") && (owner?.uint32Value != id || !login) {
+              exit(1)
+          }
+          SWIFT
+          xcrun swiftc "$probe/session.swift" -o "$probe/session"
+          "$probe/session"
+          account=paseoprobe
+          if id "$account" >/dev/null 2>&1; then exit 1; fi
+          sudo -n /usr/sbin/sysadminctl -addUser "$account" -fullName 'Paseo CI capability probe' -password "$(openssl rand -hex 32)"
+          probe_uid=$(id -u "$account")
+          if sudo -n launchctl print "gui/$probe_uid" >/dev/null 2>&1; then
+            echo 'The new account has a GUI login domain.'
+          else
+            echo 'The new account has no GUI login domain.'
           fi
-      - name: Upload security reports
-        if: '${{ !cancelled() }}'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: npm-security-${{ github.sha }}
-          path: ${{ runner.temp }}/npm-security/
-          retention-days: 7
-          if-no-files-found: error
+          sudo -n -u "$account" /usr/bin/env -i PATH=/usr/bin:/bin "$probe/session" --test-account
