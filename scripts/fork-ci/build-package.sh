@@ -29,7 +29,7 @@ const config = yaml.parse(fs.readFileSync("electron-builder.yml", "utf8"));
 config.publish = null;
 config.mac.identity = null;
 config.mac.notarize = false;
-config.electronVersion = "44.2.0";
+config.electronVersion = "44.11.5";
 config.electronDist = "/home/node/electron";
 fs.writeFileSync("trial-builder.json", JSON.stringify(config));
 NODE
